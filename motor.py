@@ -1,3 +1,4 @@
+import time
 from pymodbus.client.sync import ModbusTcpClient as ModbusClient
 
 """
@@ -7,6 +8,8 @@ Theory of operation for each axis:
     Set execute bit
     Clear execute bit
     while the execute bit is set, the
+
+Theta CCW
 """
 
 PLS_HOST = '192.168.1.202'
@@ -28,6 +31,7 @@ class AxisData(object):
          - can check against limits
         """
         self.coil_enable = coil_enable
+        self.coil_execute = coil_execute
         self.register_target = register_target
         self.discrete_enabled = discrete_enabled
         self.input_status = input_status
@@ -38,7 +42,7 @@ theta_data = AxisData(
             coil_execute=1,
             register_target=0,
             discrete_enabled=0,
-            input_status=1,
+            input_status=0,
             discrete_done=2,
             coil_home=4,
         )
@@ -47,12 +51,16 @@ pitch_data = AxisData(
             coil_execute=2,
             register_target=1,
             discrete_enabled=1,
-            input_status=3,
+            input_status=1,
             discrete_done=3,
             coil_home=5,
         )
 
-def enable(client):
+def reset():
+    client.write_coil(coil_reset, 1, 0)
+    client.write_coil(coil_reset, 0, 0)
+
+def enable():
     client.write_coil(coil_enable, 1, 0)
 
 def disable(client):
@@ -67,10 +75,13 @@ class Axis(object):
          set execute
          clear execute
         """
+        if val < 0:
+            val = 65536 + val
         client.write_register(self.data.register_target, val, 0)
-        client.write_coil(self.data.coil_enable, 1, 0)
-        # XXX sleep required???
-        client.write_coil(self.data.coil_enable, 0, 0)
+        time.sleep(0.01)
+        client.write_coil(self.data.coil_execute, 1, 0)
+        time.sleep(0.2)
+        client.write_coil(self.data.coil_execute, 0, 0)
 
     def home(self):
         client.write_coil(self.data.coil_home, 1, 0)
@@ -91,6 +102,16 @@ class Theta(Axis):
 
 class Pitch(Axis):
     data = pitch_data
+
+connected = False
+def connect():
+    global connected
+    if connected:
+        return
+    client.connect()
+    connected = True
+    reset()
+    enable()
 
 client = ModbusClient(PLS_HOST)
 theta = Theta()
