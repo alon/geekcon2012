@@ -87,7 +87,7 @@ class FunElement(gst.Element):
         return True
 
 def inverse(buffer):
-    return gst.Buffer(255-numpy.fromstring(buffer.data, dtype=numpy.uint8))
+    return gst.Buffer(255 - numpy.fromstring(buffer.data, dtype=numpy.uint8))
 
 class InverseElement(FunElement):
     def __init__(self):
@@ -101,11 +101,13 @@ gobject.type_register(FunElement)
 #
 
 def test():
-    src = 'v4l2src device=/dev/video0'
+    #src = 'v4l2src device=/dev/video0'
     #src = 'videotestsrc'
+    src = "dv1394src ! dvdemux ! dvdec "
 
     #pipeline = gst.parse_launch("%(src)s name=src ! queue ! videorate ! video/x-raw-yuv,width=320,height=240,format=(fourcc)I420,framerate=(fraction)5/1 ! ffmpegcolorspace name=last ! queue ! smokeenc ! udpsink host=132.70.7.53 port=5799" % locals())
-    pipeline = gst.parse_launch("%(src)s name=src ! queue ! videorate ! video/x-raw-yuv,width=320,height=240,format=(fourcc)I420,framerate=(fraction)5/1 ! ffmpegcolorspace name=last" % locals())
+    #pipeline = gst.parse_launch("%(src)s name=src ! queue ! videorate ! video/x-raw-yuv,width=320,height=240,format=(fourcc)I420,framerate=(fraction)5/1 ! ffmpegcolorspace name=last" % locals())
+    pipeline = gst.parse_launch("%(src)s name=src ! ffmpegcolorspace name=last" % locals())
     # ! filesink location=/tmp/test.raw name=last
 
     mainloop = gobject.MainLoop()
