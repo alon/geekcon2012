@@ -26,6 +26,8 @@ gtk.gdk.threads_init()
 import sys
 sargs = set(sys.argv)
 
+import gst
+
 def get_options():
     import optparse
     parser = optparse.OptionParser()
@@ -34,74 +36,7 @@ def get_options():
     opts, args = parser.parse_args()
     return opts
 
-import gst
-
-from inverseelement import InverseElement, FunElement, inverse
-
-#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-# Look for impr dll
-import os
-lib = os.popen('uname -m').read().strip() == 'x86_64' and './libimpr.64.so' or './libimpr.32.so'
-try:
-    # get it at http://cba.si/impr/
-    # to compile 64 bit version, remember to add -fPIC to EXTRA in the Makefile
-    impr = ctypes.CDLL(lib)
-except:
-    print "missing %s" % lib
-    class Empty(object):
-        def __getattr__(self, x):
-            return self.passthrough
-
-        def passthrough(self, x):
-            return x
-    impr = Empty()
-#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-
-def manhatten_8bit(pixels):
-    # hopefully, this doesn't blow up.
-    #impr.impr_manhattan_distance(b.data, b.data, 200, 200)
-    #segmentize_8
-    s = (pixels>>4).astype(numpy.uint8).tostring()
-    impr.impr_manhattan_distance(s, s, 100, 100)
-    return numpy.fromstring(s, dtype=numpy.uint8)
-
-max_12 = (1<<12) - 1
-
-def generate_smooth(b):
-    a = numpy.arange(len(b), dtype=numpy.int8)
-    return gst.Buffer(a.tostring())
-
-def do_8bit_fun(b, f=None):
-    # gotchas: if you have a uint8 array and you shift left, it
-    # respects it's data type, and <<8 becomes 0 - so I cast to
-    # uint16 at first.
-    base8 = numpy.fromstring(b.data, dtype=numpy.uint8)
-    base = base8.astype(numpy.uint16)
-    pixels = numpy.zeros(len(b)*2/3, dtype=numpy.uint16)
-    pixels[0::2] = base[0::3] + ((base[1::3]&0xf)<<8)
-    pixels[1::2] = (base[1::3]>>4) + (base[2::3]<<4)
-    # do something, we are going to try inverse
-    if f:
-        pixels = f(pixels)
-    # now pack back to 12 bits
-    #import pdb; pdb.set_trace()
-    p_out = numpy.zeros(len(b), dtype=numpy.uint8)
-    p_out[0::3] = pixels[0::2]&0xff
-    p_out[1::3] = ((pixels[0::2]&0xf00)>>8) + ((pixels[1::2]&0xf)<<4)
-    p_out[2::3] = (pixels[1::2]&0xff0)>>4
-    #import pdb; pdb.set_trace()
-    return gst.Buffer(p_out.tostring())
-
-def manhatten(b):
-    return do_8bit_fun(b, manhatten_8bit)
-
-def magic(b):
-    return do_8bit_fun(b, lambda pixels: (pixels.astype(float)*0.8).astype(numpy.uint8))
-
-def record(b):
-    with open(datetime.datetime.now().strftime('%Y%m%d_%H%M%S'),'w+') as fd:
-        fd.write(b)
-    return b
+from inverseelement import FunElement
 
 color=0
 
@@ -177,6 +112,7 @@ def face_detect(b):
     height = b.caps[0]['height']
     inp = cv.fromarray(numpy.fromstring(b.data, dtype=numpy.uint8).reshape(width, height, 3))
     out = averager.filter(inp)
+    #cv.DrawContours(inp, )
     return gst.Buffer(numpy.fromstring(out.tostring(), dtype=numpy.uint8))
 
 def null_cv_test(b):
@@ -189,7 +125,7 @@ def cvtest(b):
     print "cvtest", len(b)
     return b
 
-fun_functions = [face_detect, inverse, magic, manhatten, record]
+fun_functions = [face_detect]
 
 # trying out different colorspaces, and trying to use builtin gstreamer colorspace convertion (ffmpegcolorspace)
 yuv_capabilities = 'video/x-raw-yuv,width=320,height=240,format=(fourcc)I420,framerate=(fraction)5/1'
