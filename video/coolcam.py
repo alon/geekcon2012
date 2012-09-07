@@ -116,12 +116,15 @@ def gradient_cv_test(b):
     # '\x80'*(720*480*3)
     return gst.Buffer(numpy.fromstring(s, dtype=numpy.uint8))
 
+def test_image(width=4, height=4):
+    return cv.fromarray(numpy.fromstring('0'*3*width*height, dtype=numpy.uint8
+                       ).reshape(width, height, 3))
+
+def test_generic(func):
+    return func(imp)
+
 def test_filter():
-    width=4
-    height=4
-    imp=cv.fromarray(numpy.fromstring('0'*3*width*height, dtype=numpy.uint8
-                    ).reshape(width, height, 3))
-    filter(imp)
+    return test_generic(filter)
 
 def filter(inp):
     lapl = cv.CreateMat(inp.rows, inp.cols, cv.CV_8UC3)
@@ -141,10 +144,20 @@ def filter(inp):
 
 class Averager(object):
     def __init__(self, width=720, height=480):
-        self.acc = cv.C
+        # accumulator must be 32F or 64F, can't be 8U
+        self.acc = cv.CreateMat(width, height, cv.CV_32FC3)
     def filter(self, inp):
-        pass
-        #cv.
+        cv.RunningAvg(inp, self.acc, 0.1)
+        #return self.acc
+        cv.Convert(self.acc, inp)
+        #cv.ConvertImage(self.acc, inp)
+        return inp
+
+averager = Averager()
+
+def test_averager():
+    averager = Averager(4, 4)
+    return test_generic(averager.filter)
 
 def face_detect(b):
     """
@@ -163,7 +176,7 @@ def face_detect(b):
     width = b.caps[0]['width']
     height = b.caps[0]['height']
     inp = cv.fromarray(numpy.fromstring(b.data, dtype=numpy.uint8).reshape(width, height, 3))
-    out = filter(inp)
+    out = averager.filter(inp)
     return gst.Buffer(numpy.fromstring(out.tostring(), dtype=numpy.uint8))
 
 def null_cv_test(b):
