@@ -13,6 +13,7 @@ for documentation on Linux Joystick programming please see
 http://www.mjmwired.net/kernel/Documentation/input/joystick-api.txt
 '''
 
+import gtk
 from glob import glob
 import gobject #needed for sending signals
 import struct #needed for holding chunks of data
@@ -26,6 +27,15 @@ class Joystick(gobject.GObject):
     #see http://docs.python.org/library/struct.html for the format determination
     EVENT_FORMAT = "QQHHi"
     EVENT_SIZE = struct.calcsize(EVENT_FORMAT)
+
+    # This is for the logitech attach 3 only!!
+    FIRST_BUTTON = 288
+    X_AXIS = 0
+    X_POSITIVE = 'right'
+    Y_AXIS = 1
+    Y_POSITIVE = 'down'
+    Z_AXIS = 2
+    Z_POSITIVE = 'bottom (away)'
 
     # we need a few signals to send data to the main
     '''signals will return 4 variables as follows:
@@ -79,6 +89,7 @@ class Joystick(gobject.GObject):
             signal = "axis"
         elif type == self.TYPE_BUTTON:
             signal = "button"
+            code = code - self.FIRST_BUTTON
         else:
             print "ignored type = %r" % type
             return True
@@ -105,6 +116,17 @@ def find_joystick(name='Logitech'):
 class GUI(object):
     def __init__(self, j):
         self.j = j
+        self.window = window = gtk.Window()
+        self.status = gtk.Label()
+        self.status.set_text('       ')
+        self.window.add(self.status)
+        self.window.show_all()
+        self.j.connect('axis', self.on_event)
+        self.j.connect('button', self.on_event)
+
+    def on_event(self, *args):
+        print "got ", repr(args)
+        self.status.set_text(repr(args))
 
 
 if __name__ == "__main__":
