@@ -184,10 +184,10 @@ def main():
             return
         if code == 0:
             state.x = value
-            #theta.set(state.x - 127)
+            theta.set(state.x - 127)
         else:
             state.y = value
-            #pitch.set(state.y - 127)
+            pitch.set(state.y - 127)
     j.connect('axis', on_axis)
     j.connect('button', on_button)
     ml = gobject.MainLoop()
