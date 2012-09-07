@@ -47,14 +47,20 @@ class Joystick(gobject.GObject):
     __gsignals__ = {
     'axis' :
     (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE,
-    (gobject.TYPE_INT,gobject.TYPE_INT,gobject.TYPE_INT)),
+    (gobject.TYPE_INT, gobject.TYPE_INT)),
     'button' :
     (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE,
-    (gobject.TYPE_INT,gobject.TYPE_INT,gobject.TYPE_INT))
+    (gobject.TYPE_INT, gobject.TYPE_INT))
     }
 
-    def __init__(self, device):
+    def __init__(self, device = None):
         gobject.GObject.__init__(self)
+        if device is None:
+            device = find_joystick()
+            if device is None:
+                print "No joystick found\n"
+                print "TODO: emulate joystick with gui\n"
+                raise SystemExit
         #define the device
         #error check that this can be read
         try:
@@ -71,7 +77,6 @@ class Joystick(gobject.GObject):
         and emit a signal containing the event data
         '''
         #read self.EVENT_SIZE bytes from the joystick
-        print "blocking"
         read_event = self.device.read(self.EVENT_SIZE)
         if len(read_event) != self.EVENT_SIZE:
             print "got %d bytes (expected %d): %s" % (len(read_event), self.EVENT_SIZE.
@@ -79,25 +84,19 @@ class Joystick(gobject.GObject):
             return True
         #get the event structure values from  the read event
         seconds, nanos, type, code, value = struct.unpack(self.EVENT_FORMAT, read_event)
-        print "%10d %10d %d %d %d" % (seconds, nanos, type, code, value)
+        #print "%10d %10d %d %d %d" % (seconds, nanos, type, code, value)
         #get just the button/axis press event from the event type
-        #event = type & ~self.EVENT_INIT
-        #get just the INIT event from the event type
-        #init = type & ~event
-        init = 0
         if type == self.TYPE_AXIS:
             signal = "axis"
         elif type == self.TYPE_BUTTON:
             signal = "button"
-            code = code - self.FIRST_BUTTON
+            code -= self.FIRST_BUTTON
         else:
-            print "ignored type = %r" % type
+            #print "ignored type = %r" % type
             return True
-            #import pdb; pdb.set_trace()
-            #raise SystemExit
         if signal:
-            print("%s %s %s %s" % (signal,code,value,init) )
-            self.emit(signal,code,value,init)
+            #print("%s %s %s" % (signal,code,value) )
+            self.emit(signal,code,value)
 
         return True
 
@@ -121,12 +120,14 @@ class GUI(object):
         self.status.set_text('       ')
         self.window.add(self.status)
         self.window.show_all()
-        self.j.connect('axis', self.on_event)
-        self.j.connect('button', self.on_event)
+        self.j.connect('axis', self.on_axis)
+        self.j.connect('button', self.on_button)
 
-    def on_event(self, *args):
-        print "got ", repr(args)
-        self.status.set_text(repr(args))
+    def on_axis(self, signal, code, value):
+        self.status.set_text('axis %s %s' % (code, value))
+
+    def on_button(self, signal, code, value):
+        self.status.set_text('botton %s %s' % (code, ['off', 'on'][value]))
 
 
 if __name__ == "__main__":

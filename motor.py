@@ -1,5 +1,26 @@
+#!/usr/bin/python
+
+debug = False
+
 import time
-from pymodbus.client.sync import ModbusTcpClient as ModbusClient
+
+import gobject
+from gobject import timeout_add
+
+class FakeClient(object):
+    def __init__(self, host):
+        pass
+    def connect(self):
+        pass
+    def write_register(self, *args):
+        print repr(args)
+    def write_coil(self, *args):
+        print repr(args)
+
+if debug:
+    ModbusClient = FakeClient
+else:
+    from pymodbus.client.sync import ModbusTcpClient as ModbusClient
 
 """
 Theory of operation for each axis:
@@ -69,19 +90,34 @@ def disable(client):
 class Axis(object):
     data = None
 
+    def __init__(self):
+        self.during = False
+
     def set(self, val):
         """
         This implements a set that ignores done.
          set execute
          clear execute
         """
+        if self.during:
+            print "ignoring execute, during previous one"
+            return
         if val < 0:
             val = 65536 + val
+        print "writing %d -> %d" % (self.data.register_target, val)
         client.write_register(self.data.register_target, val, 0)
-        time.sleep(0.01)
+        self.during = True
+        timeout_add(10, self.set_execute_set)
+
+    def set_execute_set(self, *args):
+        print "setting coil %d" % self.data.coil_execute
         client.write_coil(self.data.coil_execute, 1, 0)
-        time.sleep(0.2)
+        timeout_add(200, self.set_execute_clear)
+
+    def set_execute_clear(self, *args):
+        print "clearing coil %d" % self.data.coil_execute
         client.write_coil(self.data.coil_execute, 0, 0)
+        self.during = False
 
     def home(self):
         client.write_coil(self.data.coil_home, 1, 0)
@@ -116,3 +152,46 @@ def connect():
 client = ModbusClient(PLS_HOST)
 theta = Theta()
 pitch = Pitch()
+
+def main():
+    connect()
+    joystick = __import__('joystick')
+    j = joystick.Joystick()
+    class state:
+        x = None
+        y = None
+    def on_button(signal, code, value):
+        if value != 1:
+            return
+        if code not in [0, 1]:
+            print "ignored button, only 0 & 1 active"
+            return
+        if code == 0:
+            if state.x is not None:
+                print "execute theta"
+                theta.set(state.x - 127)
+            else:
+                print "ignore theta, no axis motion yet"
+        else:
+            if state.y is not None:
+                print "execute pitch"
+                pitch.set(state.y - 127)
+            else:
+                print "ignore pitch, no axis motion yet"
+
+    def on_axis(signal, code, value):
+        if code not in [0, 1]:
+            return
+        if code == 0:
+            state.x = value
+            #theta.set(state.x - 127)
+        else:
+            state.y = value
+            #pitch.set(state.y - 127)
+    j.connect('axis', on_axis)
+    j.connect('button', on_button)
+    ml = gobject.MainLoop()
+    ml.run()
+
+if __name__ == '__main__':
+    main()
