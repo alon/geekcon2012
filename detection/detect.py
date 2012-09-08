@@ -23,6 +23,7 @@ CAPTURE_RADIUS_PX = 70
 CAPTURE_RADIUS_PX_SQRD = CAPTURE_RADIUS_PX**2
 
 CAPTURE_TO_AVI = False
+visuals = ['input', 'frame_diff', 'motion_hist', 'grad_orient']
 
 class Tracker(object):
     TIME_WINDOW_SEC = 2
@@ -101,25 +102,22 @@ def draw_motion_comp(vis, (x, y, w, h), angle, color):
     cv2.circle(vis, (cx, cy), r, color, 3)
     cv2.line(vis, (cx, cy), (int(cx+np.cos(angle)*r), int(cy+np.sin(angle)*r)), color, 3)
 
+def dummy_on_cx_cy(cx, cy):
+    print "dummy on_cx_cy: %d, %d" % (cx, cy)
+
 class VideoTracker(object):
-    def __init__(self, initial_frame):
-        self.prev_frame = frame.copy()
+
+    def __init__(self, initial_frame, on_cx_cy=dummy_on_cx_cy, use_cv_gui=False):
+        self.prev_frame = initial_frame.copy()
         h, w = initial_frame.shape[:2]
         self.motion_history = np.zeros((h, w), np.float32)
         self.hsv = hsv = np.zeros((h, w, 3), np.uint8)
         hsv[:,:,1] = 255
         self.tracker_group = TrackerGroup()
-    def on_frame(self, frame):
-        h, w = frame.shape[:2]
-        frame_diff = cv2.absdiff(frame, self.prev_frame)
-        gray_diff = cv2.cvtColor(frame_diff, cv2.COLOR_BGR2GRAY)
-        thrs = cv2.getTrackbarPos('threshold', 'motempl')
-        ret, motion_mask = cv2.threshold(gray_diff, thrs, 1, cv2.THRESH_BINARY)
-        timestamp = clock()
-        cv2.updateMotionHistory(motion_mask, self.motion_history, timestamp, MHI_DURATION)
-        mg_mask, mg_orient = cv2.calcMotionGradient(self.motion_history, MAX_TIME_DELTA, MIN_TIME_DELTA, apertureSize=5 )
-        seg_mask, seg_bounds = cv2.segmentMotion(self.motion_history, timestamp, MAX_TIME_DELTA)
+        self._on_cx_cy = on_cx_cy
+        self._use_cv_gui = use_cv_gui
 
+    def on_frame_cv_gui(self, frame, draws, (cx, cy)):
         visual_name = visuals[cv2.getTrackbarPos('visual', 'motempl')]
         if visual_name == 'input':
             vis = frame.copy()
@@ -133,9 +131,39 @@ class VideoTracker(object):
             self.hsv[:,:,0] = mg_orient / 2
             self.hsv[:,:,2] = mg_mask * 255
             vis = cv2.cvtColor(self.hsv, cv2.COLOR_HSV2BGR)
+        for draw in draws:
+            draw(vis=vis)
+        trackers = self.tracker_group.trackers
+        if len(trackers):
+            first_tracker = trackers[0]
+            x, y, rw, rh = first_tracker.rect
+            cv2.circle(vis, (x,y), 5, (255, 255, 255), 3)
+            cv2.circle(vis, (x+rw,y+rh), 5, (255, 255, 255), 3)
+            #cv2.circle(vis, (cx, cy), CAPTURE_RADIUS_PX, (255, 0, 0), 1)
+            color = (0,255,0) if len(first_tracker.hits) >= RELEVANT_NUMOF_HITS else (255,0,0)
+            cv2.circle(vis, (cx, cy), 20, (0, 255, 0), 3)
+            cv2.circle(vis, (cx, cy), CAPTURE_RADIUS_PX, (255, 0, 0), 1)
+            for tracker in trackers[1:]:
+                color = (0,255,0) if len(tracker.hits) >= RELEVANT_NUMOF_HITS else (0,0,255)
+                cv2.circle(vis, (tracker.last_cx, tracker.last_cy), 10, color, 1)
+        draw_str(vis, (20, 20), visual_name)
+        cv2.imshow('motempl', vis)
+
+    def on_frame(self, frame):
+        print "!"*5, "on_frame"
+        h, w = frame.shape[:2]
+        frame_diff = cv2.absdiff(frame, self.prev_frame)
+        gray_diff = cv2.cvtColor(frame_diff, cv2.COLOR_BGR2GRAY)
+        thrs = cv2.getTrackbarPos('threshold', 'motempl')
+        ret, motion_mask = cv2.threshold(gray_diff, thrs, 1, cv2.THRESH_BINARY)
+        timestamp = clock()
+        cv2.updateMotionHistory(motion_mask, self.motion_history, timestamp, MHI_DURATION)
+        mg_mask, mg_orient = cv2.calcMotionGradient(self.motion_history, MAX_TIME_DELTA, MIN_TIME_DELTA, apertureSize=5 )
+        seg_mask, seg_bounds = cv2.segmentMotion(self.motion_history, timestamp, MAX_TIME_DELTA)
 
         centers = []
         rects = []
+        draws = []
         for i, rect in enumerate([(0, 0, w, h)] + list(seg_bounds)):
             x, y, rw, rh = rect
             area = rw*rh
@@ -149,31 +177,26 @@ class VideoTracker(object):
                 continue
             angle = cv2.calcGlobalOrientation(orient_roi, mask_roi, mhi_roi, timestamp, MHI_DURATION)
             color = ((255, 0, 0), (0, 0, 255))[i == 0]
-            draw_motion_comp(vis, rect, angle, color)
+            if self._use_cv_gui:
+                draws.append(lambda vis, rect=rect, angle=angle, color=color:
+                                draw_motion_comp(vis, rect, angle, color))
             centers.append( (x+rw/2, y+rh/2) )
             rects.append(rect)
 
-
         self.tracker_group.update_trackers(centers, rects)
+
         #print 'Active trackers: %d' % len(trackers)
         #print 'Tracker score: %s' % ','.join(['%2d'%len(tracker.hits) for tracker in trackers])
         trackers = self.tracker_group.trackers
+        cx, cy = None, None
         if len(trackers):
             first_tracker = trackers[0]
-            x, y, rw, rh = first_tracker.rect
             cx, cy = center_after_median_threshold(frame, first_tracker.rect)
-            cv2.circle(vis, (x,y), 5, (255, 255, 255), 3)
-            cv2.circle(vis, (x+rw,y+rh), 5, (255, 255, 255), 3)
-            #cv2.circle(vis, (cx, cy), CAPTURE_RADIUS_PX, (255, 0, 0), 1)
-            color = (0,255,0) if len(first_tracker.hits)>=RELEVANT_NUMOF_HITS else (255,0,0)
-            cv2.circle(vis, (cx, cy), 20, (0, 255, 0), 3)
-            cv2.circle(vis, (cx, cy), CAPTURE_RADIUS_PX, (255, 0, 0), 1)
-            for tracker in trackers[1:]:
-                color = (0,255,0) if len(tracker.hits)>=RELEVANT_NUMOF_HITS else (0,0,255)
-                cv2.circle(vis, (tracker.last_cx, tracker.last_cy), 10, color, 1)
+            self._on_cx_cy(cx, cy)
 
-        draw_str(vis, (20, 20), visual_name)
-        cv2.imshow('motempl', vis)
+        if self._use_cv_gui:
+            self.on_frame_cv_gui(frame, draws, (cx, cy))
+
         #time.sleep(0.5)
         self.prev_frame = frame.copy()
         return vis
@@ -181,11 +204,12 @@ class VideoTracker(object):
 
 if __name__ == '__main__':
     import sys
-    try: video_src = sys.argv[1]
-    except: video_src = 0
+    try:
+        video_src = sys.argv[1]
+    except:
+        video_src = 0
 
     cv2.namedWindow('motempl')
-    visuals = ['input', 'frame_diff', 'motion_hist', 'grad_orient']
     cv2.createTrackbar('visual', 'motempl', 0, len(visuals)-1, nothing)
     cv2.createTrackbar('threshold', 'motempl', DEFAULT_THRESHOLD, 255, nothing)
 
@@ -199,7 +223,7 @@ if __name__ == '__main__':
     #cam = video.create_capture(video_src, fallback='synth:class=chess:bg=../cpp/lena.jpg:noise=0.01')
     cam = readframe.FakeCam()
     ret, frame = cam.read()
-    video_tracker = VideoTracker(frame)
+    video_tracker = VideoTracker(frame, use_cv_gui=True)
     while True:
         ret, frame = cam.read()
         annonated_frame = video_tracker.on_frame(frame)

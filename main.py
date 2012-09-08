@@ -28,6 +28,8 @@ sargs = set(sys.argv)
 
 import gst
 
+from detection.detect import VideoTracker
+
 def get_options():
     import optparse
     parser = optparse.OptionParser()
@@ -36,7 +38,7 @@ def get_options():
     opts, args = parser.parse_args()
     return opts
 
-from inverseelement import FunElement
+from video.inverseelement import FunElement
 
 color=0
 
@@ -125,19 +127,30 @@ def cvtest(b):
     print "cvtest", len(b)
     return b
 
-fun_functions = [face_detect]
-
 # trying out different colorspaces, and trying to use builtin gstreamer colorspace convertion (ffmpegcolorspace)
 yuv_capabilities = 'video/x-raw-yuv,width=320,height=240,format=(fourcc)I420,framerate=(fraction)5/1'
 #rgb_capabilities = 'video/x-raw-rgb,width=320,height=240,depth=24,framerate=(fraction)5/1'
 rgb_capabilities = 'video/x-raw-rgb,width=640,height=480,depth=24'
 
+class Controller(object):
+    def __init__(self):
+        self.video_tracker = None
+
+    def on_frame(self, b):
+        ret = inp = numpy.fromstring(b.data, dtype=numpy.uint8).reshape(720,480,3)
+        if self.video_tracker is not None:
+            ret = self.video_tracker.on_frame(inp)
+        self.video_tracker = VideoTracker(initial_frame=inp, on_cx_cy=self.on_cx_cy)
+        return gst.Buffer(ret)
+
+    def on_cx_cy(self, cx, cy):
+        print "controller: got (%d, %d)" % (cx, cy)
+
 class GTK_Main(object):
 
-    def __init__(self):
-        self.fun_functions = fun_functions
+    def __init__(self, controller):
         self._window = window = gtk.Window(gtk.WINDOW_TOPLEVEL)
-        window.set_title("Webcam-Viewer")
+        window.set_title("iBalloon")
         window.set_default_size(500, 400)
         window.connect("destroy", gtk.main_quit, "WM destroy")
         vbox = gtk.VBox()
@@ -150,9 +163,8 @@ class GTK_Main(object):
         hbox.pack_start(gtk.Label())
         self.buttons = []
         for label, clicked in [
-            ('debug', self.toggle_debug)] + [
-                (f.func_name, lambda w, self=self, f=f: self.set_fun(f))
-                    for f in self.fun_functions] + [('quit', self.exit)]:
+                    ('quit', self.exit)
+                ]:
             button = gtk.Button(label)
             button.connect('clicked', clicked)
             hbox.pack_start(button, False)
@@ -161,19 +173,10 @@ class GTK_Main(object):
         hbox.add(gtk.Label())
         window.show_all()
 
-        # Set up the gstreamer pipeline
-        # v4l2src
-        # dc1394src
+        # Set up the gstreamer pipeline (v4l2src / dc1394src)
         if options.test:
-            #src = 'videotestsrc ! %s ! ffmpegcolorspace ! videorate' % rgb_capabilities
-            cmd = "multifilesrc location=recs/black/%05d loop=1 caps=video/x-raw-yuv,format=(fourcc)YUY2,width=(int)720,height=(int)480,framerate=(fraction)30000/1001,pixel-aspect-ratio=(fraction)40/33,interlaced=(boolean)true ! ffmpegcolorspace ! video/x-raw-rgb ! queue name=a . ffmpegcolorspace name=b ! video/x-raw-yuv ! xvimagesink"
+            cmd = "multifilesrc location=video/recs/yoni/yuv/%05d loop=1 caps=video/x-raw-yuv,format=(fourcc)YUY2,width=(int)720,height=(int)480,framerate=(fraction)30000/1001,pixel-aspect-ratio=(fraction)40/33,interlaced=(boolean)true ! ffmpegcolorspace ! video/x-raw-rgb ! queue name=a . ffmpegcolorspace name=b ! video/x-raw-yuv ! xvimagesink"
         else:
-            #src = 'v4l2src ! %s ! ffmpegcolorspace ! videorate' % rgb_capabilities
-            #src = 'v4l2src ! videorate'
-            #src = 'dc1394src'
-            #src = "dv1394src ! dvdemux ! dvdec ! queue ! ffmpegcolorspace"
-            #src = "dv1394src ! dvdemux ! dvdec ! ffmpegcolorspace ! video/x-raw-rgb,width=720,height=480"
-            #src = "dv1394src ! dvdemux ! dvdec ! ffmpegcolorspace ! 'video/x-raw-rgb' ! queue name=a"
             cmd = "dv1394src ! dvdemux ! dvdec ! ffmpegcolorspace ! video/x-raw-rgb ! queue name=a . ffmpegcolorspace name=b ! video/x-raw-yuv ! xvimagesink"
         #src = 'videotestsrc'
         #cmd = "%(src)s . ffmpegcolorspace name=b ! 'video/x-raw-yuv' ! xvimagesink" % {'src': src}
@@ -183,7 +186,7 @@ class GTK_Main(object):
         self.b = self.player.get_by_name('b')
         #gst.element_factory_make
         self.fun = FunElement()
-        self.fun.setFun(self.fun_functions[0])
+        self.fun.setFun(controller.on_frame)
         self.player.add(self.fun)
         #self.player.add(self.fun, final)
         if options.noaction:
@@ -195,29 +198,11 @@ class GTK_Main(object):
         bus = self.player.get_bus()
         bus.add_signal_watch()
         bus.enable_sync_message_emission()
-        bus.connect("message", self.on_message)
         bus.connect("sync-message::element", self.on_sync_message)
         self.player.set_state(gst.STATE_PLAYING)
 
-    def set_fun(self, f):
-        self.fun.setFun(f)
-
-    def toggle_debug(self, w):
-        self._debug = True
-
     def exit(self, widget, data=None):
         gtk.main_quit()
-
-    def on_message(self, bus, message):
-        t = message.type
-        if t == gst.MESSAGE_EOS:
-            self.player.set_state(gst.STATE_NULL)
-            self.button.set_label("Start")
-        elif t == gst.MESSAGE_ERROR:
-            err, debug = message.parse_error()
-            print "Error: %s" % err, debug
-            self.player.set_state(gst.STATE_NULL)
-            self.button.set_label("Start")
 
     def on_sync_message(self, bus, message):
         if message.structure is None:
@@ -231,5 +216,6 @@ class GTK_Main(object):
 
 if __name__ == '__main__':
     options = get_options()
-    GTK_Main()
+    controller = Controller()
+    GTK_Main(controller)
     gtk.main()
