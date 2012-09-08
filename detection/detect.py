@@ -1,6 +1,6 @@
 import time
-
 from operator import attrgetter
+
 import numpy as np
 from numpy import average
 import cv2
@@ -163,6 +163,7 @@ class VideoTracker(object):
 
     def on_frame(self, frame):
         h, w = frame.shape[:2]
+        qi = 0
         #print "on_frame %d x %d" % (h, w)
         frame_diff = cv2.absdiff(frame, self.prev_frame)
         gray_diff = cv2.cvtColor(frame_diff, cv2.COLOR_BGR2GRAY)
@@ -205,14 +206,15 @@ class VideoTracker(object):
             first_tracker = trackers[0]
             cx, cy = center_after_median_threshold(frame, first_tracker.rect)
             cv2.circle(frame, (cx, cy), 5, (255, 255, 255), 3)
+        print str(qi)*5; qi += 1
+        print self._on_cx_cy
         self._on_cx_cy(cx, cy) # gives None's for no identified balloon
+        print str(qi)*5; qi += 1
 
         if self._use_cv_gui:
             self.on_frame_cv_gui(frame, draws, (cx, cy))
         else:
-            print "1"
             self.frame_vis(frame, draws, (cx, cy))
-            print "2"
 
         #time.sleep(0.5)
         self.prev_frame = frame.copy()

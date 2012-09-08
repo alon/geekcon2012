@@ -7,8 +7,11 @@ on the device files.
 
 from __future__ import with_statement
 
+debug = True
+
 import time
 import datetime
+from multiprocessing import Process, Queue
 
 import ctypes
 import numpy
@@ -34,8 +37,15 @@ sargs = set(sys.argv)
 import gst
 
 from detection.detect import VideoTracker
-import motor
+if debug:
+    import fake_motor as motor
+else:
+    import motor
 import joystick
+if debug:
+    import fake_trigger as trigger
+else:
+    import trigger
 
 def get_options():
     import optparse
@@ -139,11 +149,67 @@ yuv_capabilities = 'video/x-raw-yuv,width=320,height=240,format=(fourcc)I420,fra
 #rgb_capabilities = 'video/x-raw-rgb,width=320,height=240,depth=24,framerate=(fraction)5/1'
 rgb_capabilities = 'video/x-raw-rgb,width=640,height=480,depth=24'
 
+class DetectProcess(Process):
+
+    def __init__(self, inq, outq):
+        Process.__init__(self)
+        self.inq = inq
+        self.outq = outq
+
+    def run(self):
+        print "detect: running"
+        while True:
+            inp = self.inq.get()
+            assert(inp == 'test')
+            self.outq.put('testout')
+        print "detect: got from queue"
+        self.video_tracker = VideoTracker(initial_frame=inp, on_cx_cy=self.on_cx_cy)
+        print "detect: putting into queue"
+        self.outq.put(inp)
+        while True:
+            inp = self.inq.get()
+            ret = inp
+            #ret = self.video_tracker.on_frame(inp)
+            self.outq.put(ret)
+
 class Controller(object):
     def __init__(self):
         self.video_tracker = None
-        #motor.connect()
-        #self.init_joystick()
+        print "CONNECTING Motor"
+        motor.connect()
+        print "CONNECTING Trigger"
+        self.trigger = trigger.Trigger()
+        print "CONNECTING Joystick"
+        self.init_joystick()
+        self.manual = False
+        self.x = None
+        self.y = None
+        self.fire_duration = 200
+        self.video_tracker = None
+
+    def _unused_init_detec_process(self):
+        self.video_in = Queue()
+        self.video_out = Queue()
+        self.detect_process = DetectProcess(inq=self.video_in, outq=self.video_out)
+        self.detect_process.start()
+
+    def on_frame(self, b):
+        ret = inp = numpy.fromstring(b.data, dtype=numpy.uint8).reshape(480,720,3)
+        if not self.video_tracker:
+            self.video_tracker = VideoTracker(initial_frame=inp, on_cx_cy=self.on_cx_cy)
+        else:
+            ret = self.video_tracker.on_frame(inp)
+        return gst.Buffer(ret)
+
+    def on_frame_process(self, b):
+        ret = inp = numpy.fromstring(b.data, dtype=numpy.uint8).reshape(480,720,3)
+        print "pushing"
+        self.video_in.push('test')
+        print "popping"
+        ret_unused = self.video_out.pop()
+        assert(ret_unused == 'testout')
+        print "popped"
+        return gst.Buffer(ret)
 
     def init_joystick(self):
         self.j = joystick.Joystick()
@@ -152,21 +218,38 @@ class Controller(object):
 
     def on_axis(self, signal, code, value):
         print "on_axis %s %s" % (code, value)
+        #print "on_axis %d, %d" % (code, value)
+        if code not in [0, 1, 2]:
+            return
+        if code == 0:
+            self.x = value
+            if self.manual:
+                motor.theta.set(state.x - 127)
+        elif code == 1:
+            self.y = value
+            if self.manual:
+                motor.pitch.set(state.y - 127)
+        else:
+            fire_duration = 100 + (float(value) / 255.0) * 900
+            print "joy: %d => fire dur %d" % (value, fire_duration)
+            self.fire_duration = int(fire_duration)
 
     def on_button(self, signal, code, value):
-        print "on_button %s %s" % (code, value)
-
-    def on_frame(self, b):
-        ret = inp = numpy.fromstring(b.data, dtype=numpy.uint8).reshape(480,720,3)
-        if self.video_tracker is not None:
-            ret = self.video_tracker.on_frame(inp)
-        else:
-            print "initializing video tracker"
-            self.video_tracker = VideoTracker(initial_frame=inp, on_cx_cy=self.on_cx_cy)
-        return gst.Buffer(ret)
+        print "on_button: %d, %d" % (code, value)
+        if value != 1 or code != 0:
+            return
+        print " **** FIRE ****"
+        self.trigger.fire(self.fire_duration)
 
     def on_cx_cy(self, cx, cy):
+        0/0
         print "controller: got (%d, %d)" % (cx, cy)
+        cx -= 720 / 2
+        cy -= 480 / 2
+        for axis, val in [(motor.theta, cx), (motor.pitch, cy)]:
+            if abs(val) > 10:
+                print "action %r" % axis
+                axis.set(200 if cx > 0 else -200)
 
 class GTK_Main(object):
 
@@ -199,7 +282,8 @@ class GTK_Main(object):
         if options.test:
             cmd = "multifilesrc location=video/recs/yoni/yuv/%05d loop=1 caps=video/x-raw-yuv,format=(fourcc)YUY2,width=(int)720,height=(int)480,framerate=(fraction)30000/1001,pixel-aspect-ratio=(fraction)40/33,interlaced=(boolean)true ! ffmpegcolorspace ! video/x-raw-rgb ! queue name=a . ffmpegcolorspace name=b ! video/x-raw-yuv ! xvimagesink"
         else:
-            cmd = "dv1394src ! dvdemux ! dvdec ! ffmpegcolorspace ! video/x-raw-rgb ! queue name=a . ffmpegcolorspace name=b ! video/x-raw-yuv ! xvimagesink"
+            #cmd = "dv1394src ! dvdemux ! dvdec ! ffmpegcolorspace ! video/x-raw-rgb ! queue name=a . ffmpegcolorspace name=b ! video/x-raw-yuv ! videoflip method=clockwise ! xvimagesink"
+            cmd = "dv1394src ! dvdemux ! dvdec ! queue ! ffmpegcolorspace ! queue ! video/x-raw-rgb ! queue name=a . ffmpegcolorspace name=b ! video/x-raw-yuv ! xvimagesink"
         #src = 'videotestsrc'
         #cmd = "%(src)s . ffmpegcolorspace name=b ! 'video/x-raw-yuv' ! xvimagesink" % {'src': src}
         print "using parse_launch on %r" % cmd

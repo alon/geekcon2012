@@ -1,6 +1,9 @@
 #!/usr/bin/python
 
-debug = False
+debug = True
+
+if debug:
+    print "DEBUG " * 10
 
 import time
 
@@ -111,18 +114,20 @@ def disabled(f):
 class Axis(object):
     data = None
 
-    def __init__(self, name):
+    def __init__(self, name, verbose=False):
         self.during = False
         self._execute = False
         self.name = name
         self._disabled = False
+        self._verbose = verbose
         print "speed mode: enable execute"
 
     def disable(self):
         self._disabled = True
 
     def prnt(self, fmt, *args):
-        print("%s: %s" % (self.name, fmt % args))
+        if self._verbose:
+            print("%s: %s" % (self.name, fmt % args))
 
     @disabled
     def set_position(self, val):
@@ -153,7 +158,7 @@ class Axis(object):
             client.write_coil(self.data.coil_jog_negative, 0)
 
     def dead(self, val):
-        return abs(val) < 5
+        return abs(val) < 10
 
     @disabled
     def set(self, val):
@@ -218,13 +223,29 @@ pitch = Pitch('pitch')
 #theta.disable()
 
 def main():
+    print "CONNECTING Modbus"
     connect()
+    print "CONNECTING Trigger"
+    if debug:
+        trigger = FakeTrigger()
+    else:
+        trigger = __import__('trigger').Trigger()
+    print "CONNECTING Joystick"
     joystick = __import__('joystick')
     j = joystick.Joystick()
     class state:
         x = None
         y = None
+        fire_duration = 200
+
     def on_button(signal, code, value):
+        print "on_button: %d, %d" % (code, value)
+        if value != 1 or code != 0:
+            return
+        print " **** FIRE ****"
+        trigger.fire(state.fire_duration)
+
+    def on_button_do_execute(signal, code, value):
         if value != 1:
             return
         if code not in [0, 1]:
@@ -244,16 +265,22 @@ def main():
                 print "ignore pitch, no axis motion yet"
 
     def on_axis(signal, code, value):
-        if code not in [0, 1]:
+        #print "on_axis %d, %d" % (code, value)
+        if code not in [0, 1, 2]:
             return
         if code == 0:
             state.x = value
             theta.set(state.x - 127)
-        else:
+        elif code == 1:
             state.y = value
             pitch.set(state.y - 127)
+        else:
+            fire_duration = 100 + (float(value) / 255.0) * 900
+            print "joy: %d => fire dur %d" % (value, fire_duration)
+            state.fire_duration = int(fire_duration)
+
     j.connect('axis', on_axis)
-    #j.connect('button', on_button)
+    j.connect('button', on_button)
     ml = gobject.MainLoop()
     ml.run()
 
