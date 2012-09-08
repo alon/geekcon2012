@@ -22,6 +22,8 @@ RELEVANT_NUMOF_HITS = 5
 CAPTURE_RADIUS_PX = 70
 CAPTURE_RADIUS_PX_SQRD = CAPTURE_RADIUS_PX**2
 
+CAPTURE_TO_AVI = False
+
 class Tracker(object):
     TIME_WINDOW_SEC = 2
 
@@ -174,6 +176,7 @@ class VideoTracker(object):
         cv2.imshow('motempl', vis)
         #time.sleep(0.5)
         self.prev_frame = frame.copy()
+        return vis
 
 
 if __name__ == '__main__':
@@ -186,13 +189,25 @@ if __name__ == '__main__':
     cv2.createTrackbar('visual', 'motempl', 0, len(visuals)-1, nothing)
     cv2.createTrackbar('threshold', 'motempl', DEFAULT_THRESHOLD, 255, nothing)
 
+	if CAPTURE_TO_AVI:
+        # uncompressed YUV 4:2:0 chroma subsampled
+        fourcc = cv.CV_FOURCC('I','4','2','0')
+        fps=24
+        width = 720
+        height = 480
+        writer = cv.CreateVideoWriter('out.avi', fourcc, fps, (width, height), 1)
     #cam = video.create_capture(video_src, fallback='synth:class=chess:bg=../cpp/lena.jpg:noise=0.01')
     cam = readframe.FakeCam()
     ret, frame = cam.read()
     video_tracker = VideoTracker(frame)
     while True:
         ret, frame = cam.read()
-        video_tracker.on_frame(frame)
+        annonated_frame = video_tracker.on_frame(frame)
+        if CAPTURE_TO_AVI:
+            bitmap = cv.CreateImageHeader((annonated_frame.shape[1], annonated_frame.shape[0]), cv.IPL_DEPTH_8U, 3)
+            cv.SetData(bitmap, annonated_frame.tostring(),
+                annonated_frame.dtype.itemsize * 3 * annonated_frame.shape[1])
+            cv.WriteFrame(writer, bitmap)
         if 0xFF & cv2.waitKey(5) == 27:
             break
     cv2.destroyAllWindows()
