@@ -19,49 +19,21 @@ MIN_TIME_DELTA = 0.05
 TRACKER_OK = 1
 TRACKER_DEAD = 0
 RELEVANT_NUMOF_HITS = 5
-trackers=[]
 CAPTURE_RADIUS_PX = 70
 CAPTURE_RADIUS_PX_SQRD = CAPTURE_RADIUS_PX**2
 
 class Tracker(object):
     TIME_WINDOW_SEC = 2
-    @staticmethod
-    def update_trackers(centers, rects):
-        centers_to_rects = dict(zip(centers,rects))
-        global trackers
-        #print 'received %d centers' % len(centers)
-        t = time.time()
-        cutoff_time = t - Tracker.TIME_WINDOW_SEC
-        kill_set = set()
-        cx_cy_set = set()
-        for tracker in trackers:
-            if tracker.update(t, cutoff_time, centers, rects)==TRACKER_DEAD:
-                kill_set.add(tracker)
-            else:
-                tracker_xy = (tracker.last_cx, tracker.last_cy)
-                if tracker_xy in cx_cy_set:
-                    kill_set.add(tracker)
-                else:
-                    cx_cy_set.add(tracker_xy)
-        for tracker_to_kill in list(kill_set):
-            trackers.remove(tracker_to_kill)
-        new_cx_cy_list = list(set(centers)-cx_cy_set)
-#        if len(new_cx_cy_list):
-#            print 'adding %d trackers' % len(new_cx_cy_list)
-        for new_cx, new_cy in new_cx_cy_list:
-            trackers.append(Tracker(new_cx, new_cy, centers_to_rects[(new_cx, new_cy)]))
-        trackers.sort(key=attrgetter('score'), reverse=True)
-
-    last_cx = -1.0
-    last_cy = -1.0
-    hits = [] # list of hit time.time()
 
     def __init__(self, init_cx, init_cy, rect):
         self.last_cx=init_cx
         self.last_cy=init_cy
         self.rect = rect
+        self.hits = [] # list of hit time.time()
+
     def update(self, t, cutoff_time, centers, rects):
-        self.hits = [hit for hit in self.hits if hit>cutoff_time]
+        # better to del?
+        self.hits = [hit for hit in self.hits if hit > cutoff_time]
         for i,(cx,cy) in enumerate(centers):
             if (cx-self.last_cx)**2+(cy-self.last_cy)**2<CAPTURE_RADIUS_PX_SQRD:
                 self.last_cx = cx
@@ -73,6 +45,40 @@ class Tracker(object):
     @property
     def score(self):
         return len(self.hits)
+
+class TrackerGroup(object):
+
+    def __init__(self):
+        self.last_cx = -1.0
+        self.last_cy = -1.0
+        self.trackers = []
+
+    def update_trackers(self, centers, rects):
+        centers_to_rects = dict(zip(centers,rects))
+        trackers = self.trackers
+        #print 'received %d centers' % len(centers)
+        t = time.time()
+        cutoff_time = t - Tracker.TIME_WINDOW_SEC
+        kill_set = set()
+        cx_cy_set = set()
+        for tracker in trackers:
+            if tracker.update(t, cutoff_time, centers, rects) == TRACKER_DEAD:
+                kill_set.add(tracker)
+            else:
+                tracker_xy = (tracker.last_cx, tracker.last_cy)
+                if tracker_xy in cx_cy_set:
+                    kill_set.add(tracker)
+                else:
+                    cx_cy_set.add(tracker_xy)
+        for tracker_to_kill in list(kill_set):
+            trackers.remove(tracker_to_kill)
+        new_cx_cy_list = list(set(centers) - cx_cy_set)
+#        if len(new_cx_cy_list):
+#            print 'adding %d trackers' % len(new_cx_cy_list)
+        for new_cx, new_cy in new_cx_cy_list:
+            trackers.append(Tracker(new_cx, new_cy, centers_to_rects[(new_cx, new_cy)]))
+        trackers.sort(key=attrgetter('score'), reverse=True)
+
 
 def center_after_median_threshold(frame, rect):
     x, y, w, h = rect
@@ -100,6 +106,7 @@ class VideoTracker(object):
         self.motion_history = np.zeros((h, w), np.float32)
         self.hsv = hsv = np.zeros((h, w, 3), np.uint8)
         hsv[:,:,1] = 255
+        self.tracker_group = TrackerGroup()
     def on_frame(self, frame):
         h, w = frame.shape[:2]
         frame_diff = cv2.absdiff(frame, self.prev_frame)
@@ -145,9 +152,10 @@ class VideoTracker(object):
             rects.append(rect)
 
 
-        Tracker.update_trackers(centers, rects)
+        self.tracker_group.update_trackers(centers, rects)
         #print 'Active trackers: %d' % len(trackers)
         #print 'Tracker score: %s' % ','.join(['%2d'%len(tracker.hits) for tracker in trackers])
+        trackers = self.tracker_group.trackers
         if len(trackers):
             first_tracker = trackers[0]
             x, y, rw, rh = first_tracker.rect
