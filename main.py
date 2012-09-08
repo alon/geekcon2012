@@ -34,6 +34,8 @@ sargs = set(sys.argv)
 import gst
 
 from detection.detect import VideoTracker
+import motor
+import joystick
 
 def get_options():
     import optparse
@@ -140,6 +142,19 @@ rgb_capabilities = 'video/x-raw-rgb,width=640,height=480,depth=24'
 class Controller(object):
     def __init__(self):
         self.video_tracker = None
+        #motor.connect()
+        #self.init_joystick()
+
+    def init_joystick(self):
+        self.j = joystick.Joystick()
+        self.j.connect('axis', self.on_axis)
+        self.j.connect('button', self.on_button)
+
+    def on_axis(self, signal, code, value):
+        print "on_axis %s %s" % (code, value)
+
+    def on_button(self, signal, code, value):
+        print "on_button %s %s" % (code, value)
 
     def on_frame(self, b):
         ret = inp = numpy.fromstring(b.data, dtype=numpy.uint8).reshape(480,720,3)

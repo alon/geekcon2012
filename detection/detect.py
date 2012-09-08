@@ -126,20 +126,7 @@ class VideoTracker(object):
         cv2.createTrackbar('visual', 'motempl', 0, len(visuals) - 1, nothing)
         cv2.createTrackbar('threshold', 'motempl', self._threshold, 255, nothing)
 
-    def on_frame_cv_gui(self, frame, draws, (cx, cy)):
-        visual_name = visuals[cv2.getTrackbarPos('visual', 'motempl')]
-        if visual_name == 'input':
-            vis = frame.copy()
-        elif visual_name == 'frame_diff':
-            vis = frame_diff.copy()
-        elif visual_name == 'motion_hist':
-            vis = np.uint8(np.clip(
-                (self.motion_history - (timestamp - MHI_DURATION)) / MHI_DURATION, 0, 1) * 255)
-            vis = cv2.cvtColor(vis, cv2.COLOR_GRAY2BGR)
-        elif visual_name == 'grad_orient':
-            self.hsv[:,:,0] = mg_orient / 2
-            self.hsv[:,:,2] = mg_mask * 255
-            vis = cv2.cvtColor(self.hsv, cv2.COLOR_HSV2BGR)
+    def frame_vis(self, vis, draws, (cx, cy)):
         for draw in draws:
             draw(vis=vis)
         trackers = self.tracker_group.trackers
@@ -155,6 +142,22 @@ class VideoTracker(object):
             for tracker in trackers[1:]:
                 color = (0,255,0) if len(tracker.hits) >= RELEVANT_NUMOF_HITS else (0,0,255)
                 cv2.circle(vis, (tracker.last_cx, tracker.last_cy), 10, color, 1)
+
+    def on_frame_cv_gui(self, frame, draws, (cx, cy)):
+        visual_name = visuals[cv2.getTrackbarPos('visual', 'motempl')]
+        if visual_name == 'input':
+            vis = frame.copy()
+        elif visual_name == 'frame_diff':
+            vis = frame_diff.copy()
+        elif visual_name == 'motion_hist':
+            vis = np.uint8(np.clip(
+                (self.motion_history - (timestamp - MHI_DURATION)) / MHI_DURATION, 0, 1) * 255)
+            vis = cv2.cvtColor(vis, cv2.COLOR_GRAY2BGR)
+        elif visual_name == 'grad_orient':
+            self.hsv[:,:,0] = mg_orient / 2
+            self.hsv[:,:,2] = mg_mask * 255
+            vis = cv2.cvtColor(self.hsv, cv2.COLOR_HSV2BGR)
+        self.frame_vis(vis, draws, (cx, cy))
         draw_str(vis, (20, 20), visual_name)
         cv2.imshow('motempl', vis)
 
@@ -201,10 +204,15 @@ class VideoTracker(object):
         if len(trackers):
             first_tracker = trackers[0]
             cx, cy = center_after_median_threshold(frame, first_tracker.rect)
-            self._on_cx_cy(cx, cy)
+            cv2.circle(frame, (cx, cy), 5, (255, 255, 255), 3)
+        self._on_cx_cy(cx, cy) # gives None's for no identified balloon
 
         if self._use_cv_gui:
             self.on_frame_cv_gui(frame, draws, (cx, cy))
+        else:
+            print "1"
+            self.frame_vis(frame, draws, (cx, cy))
+            print "2"
 
         #time.sleep(0.5)
         self.prev_frame = frame.copy()
