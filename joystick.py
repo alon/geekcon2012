@@ -60,7 +60,7 @@ class Joystick(gobject.GObject):
             if device is None:
                 print "No joystick found\n"
                 print "TODO: emulate joystick with gui\n"
-                raise SystemExit
+                return
         #define the device
         #error check that this can be read
         try:

@@ -7,8 +7,11 @@ on the device files.
 
 from __future__ import with_statement
 
-debug = True
+debug = False
+motor_debug = True
 
+import optparse
+import atexit
 import time
 import datetime
 from multiprocessing import Process, Queue
@@ -37,112 +40,22 @@ sargs = set(sys.argv)
 import gst
 
 from detection.detect import VideoTracker
-if debug:
-    import fake_motor as motor
-else:
-    import motor
 import joystick
-if debug:
-    import fake_trigger as trigger
-else:
-    import trigger
 
 def get_options():
-    import optparse
+    global debug
+    global motor_debug
     parser = optparse.OptionParser()
     parser.add_option('-n', '--noaction', dest='noaction', help="don't actually do anything with the image - just show the camera picture", action='store_true')
     parser.add_option('-t', '--test', dest='test', help="use videotestsrc", action='store_true')
+    parser.add_option('--debug', default=debug, action='store_true')
+    parser.add_option('--motor-debug', default=motor_debug, action='store_true')
     opts, args = parser.parse_args()
+    debug = opts.debug
+    motor_debug = opts.motor_debug
     return opts
 
 from video.inverseelement import FunElement
-
-color=0
-
-def gradient_cv_test(b):
-    global color
-    #print repr(b)
-    color = (1 + color) % 256
-    #rgb = cv.fromarray(b)
-    rgb = cv.CreateMat(720, 480, cv.CV_8UC3)
-    cv.Set(rgb, (color, color, color))
-    s = rgb.tostring()
-    # '\x80'*(720*480*3)
-    return gst.Buffer(numpy.fromstring(s, dtype=numpy.uint8))
-
-def test_image(width=4, height=4):
-    return cv.fromarray(numpy.fromstring('0'*3*width*height, dtype=numpy.uint8
-                       ).reshape(width, height, 3))
-
-def test_generic(func):
-    return func(imp)
-
-def test_filter():
-    return test_generic(filter)
-
-def filter(inp):
-    lapl = cv.CreateMat(inp.rows, inp.cols, cv.CV_8UC3)
-    #lapl = cv.CreateImage((inp.rows, inp.cols), 32, 1)
-    m = cv.CreateMat(3, 3, cv.CV_8UC1)
-    m[0, 0] = 0
-    m[0, 1] = 0
-    m[0, 2] = 0
-    m[2, 0] = -1
-    m[2, 1] = -1
-    m[2, 2] = -1
-    m[1, 0] = -1
-    m[1, 2] = -1
-    m[1, 1] = 5
-    cv.Filter2D(inp, lapl, m)
-    return lapl
-
-class Averager(object):
-    def __init__(self, width=720, height=480):
-        # accumulator must be 32F or 64F, can't be 8U
-        self.acc = cv.CreateMat(width, height, cv.CV_32FC3)
-    def filter(self, inp):
-        cv.RunningAvg(inp, self.acc, 0.1)
-        #return self.acc
-        cv.Convert(self.acc, inp)
-        #cv.ConvertImage(self.acc, inp)
-        return inp
-
-averager = Averager()
-
-def test_averager():
-    averager = Averager(4, 4)
-    return test_generic(averager.filter)
-
-def face_detect(b):
-    """
-    dir(b)
-    ['__class__', '__cmp__', '__delattr__', '__delitem__', '__delslice__',
-    '__dict__', '__doc__', '__format__', '__getattribute__', '__getitem__',
-    '__getslice__', '__grefcount__', '__gstminiobject_init__', '__gtype__',
-    '__hash__', '__init__', '__len__', '__new__', '__reduce__', '__reduce_ex__',
-    '__repr__', '__setattr__', '__setitem__', '__setslice__', '__sizeof__',
-    '__str__', '__subclasshook__', 'caps', 'copy', 'copy_on_write',
-    'create_sub', 'data', 'duration', 'flag_is_set', 'flag_set', 'flag_unset',
-    'flags', 'get_caps', 'is_metadata_writable', 'is_span_fast', 'join',
-    'make_metadata_writable', 'merge', 'offset', 'offset_end', 'set_caps',
-    'size', 'span', 'stamp', 'timestamp']
-    """
-    width = b.caps[0]['width']
-    height = b.caps[0]['height']
-    inp = cv.fromarray(numpy.fromstring(b.data, dtype=numpy.uint8).reshape(width, height, 3))
-    out = averager.filter(inp)
-    #cv.DrawContours(inp, )
-    return gst.Buffer(numpy.fromstring(out.tostring(), dtype=numpy.uint8))
-
-def null_cv_test(b):
-    print dir(b)
-    inp = cv.fromarray(numpy.fromstring(b.data, dtype=numpy.uint8).reshape(720,480,3))
-    out = inp
-    return gst.Buffer(numpy.fromstring(out.tostring(), dtype=numpy.uint8))
-
-def cvtest(b):
-    print "cvtest", len(b)
-    return b
 
 # trying out different colorspaces, and trying to use builtin gstreamer colorspace convertion (ffmpegcolorspace)
 yuv_capabilities = 'video/x-raw-yuv,width=320,height=240,format=(fourcc)I420,framerate=(fraction)5/1'
@@ -172,8 +85,25 @@ class DetectProcess(Process):
             #ret = self.video_tracker.on_frame(inp)
             self.outq.put(ret)
 
+def get_motor(motor_debug):
+    if motor_debug:
+        motor = __import__('fake_motor')
+    else:
+        motor = __import('motor')
+    return motor
+
+def get_trigger(debug):
+    if debug:
+        trigger = __import__('fake_trigger')
+    else:
+        trigger = __import__('trigger')
+    return trigger
+
 class Controller(object):
     def __init__(self):
+        motor = get_motor(motor_debug)
+        trigger = get_trigger(debug)
+        self.motor = motor
         self.video_tracker = None
         print "CONNECTING Motor"
         motor.connect()
@@ -187,7 +117,7 @@ class Controller(object):
         self.fire_duration = 200
         self.video_tracker = None
 
-    def _unused_init_detec_process(self):
+    def _unused_init_detect_process(self):
         self.video_in = Queue()
         self.video_out = Queue()
         self.detect_process = DetectProcess(inq=self.video_in, outq=self.video_out)
@@ -224,11 +154,11 @@ class Controller(object):
         if code == 0:
             self.x = value
             if self.manual:
-                motor.theta.set(state.x - 127)
+                self.motor.theta.set(state.x - 127)
         elif code == 1:
             self.y = value
             if self.manual:
-                motor.pitch.set(state.y - 127)
+                self.motor.pitch.set(state.y - 127)
         else:
             fire_duration = 100 + (float(value) / 255.0) * 900
             print "joy: %d => fire dur %d" % (value, fire_duration)
@@ -242,14 +172,19 @@ class Controller(object):
         self.trigger.fire(self.fire_duration)
 
     def on_cx_cy(self, cx, cy):
-        0/0
-        print "controller: got (%d, %d)" % (cx, cy)
+        #print "controller: got (%d, %d)" % (cx, cy)
         cx -= 720 / 2
         cy -= 480 / 2
-        for axis, val in [(motor.theta, cx), (motor.pitch, cy)]:
+        for axis, val in [(self.motor.theta, cx), (self.motor.pitch, cy)]:
             if abs(val) > 10:
                 print "action %r" % axis
                 axis.set(200 if cx > 0 else -200)
+
+def turn_off_motors(*args):
+    motor = get_motor(motor_debug)
+    motor.disable()
+
+atexit.register(turn_off_motors)
 
 class GTK_Main(object):
 
@@ -283,7 +218,9 @@ class GTK_Main(object):
             cmd = "multifilesrc location=video/recs/yoni/yuv/%05d loop=1 caps=video/x-raw-yuv,format=(fourcc)YUY2,width=(int)720,height=(int)480,framerate=(fraction)30000/1001,pixel-aspect-ratio=(fraction)40/33,interlaced=(boolean)true ! ffmpegcolorspace ! video/x-raw-rgb ! queue name=a . ffmpegcolorspace name=b ! video/x-raw-yuv ! xvimagesink"
         else:
             #cmd = "dv1394src ! dvdemux ! dvdec ! ffmpegcolorspace ! video/x-raw-rgb ! queue name=a . ffmpegcolorspace name=b ! video/x-raw-yuv ! videoflip method=clockwise ! xvimagesink"
-            cmd = "dv1394src ! dvdemux ! dvdec ! queue ! ffmpegcolorspace ! queue ! video/x-raw-rgb ! queue name=a . ffmpegcolorspace name=b ! video/x-raw-yuv ! xvimagesink"
+            firewire = "dv1394src ! dvdemux ! dvdec"
+            v4l2 = "v4l2src"
+            cmd = v4l2 + " ! ffmpegcolorspace ! video/x-raw-rgb ! queue name=a . ffmpegcolorspace name=b ! video/x-raw-yuv ! xvimagesink"
         #src = 'videotestsrc'
         #cmd = "%(src)s . ffmpegcolorspace name=b ! 'video/x-raw-yuv' ! xvimagesink" % {'src': src}
         print "using parse_launch on %r" % cmd
@@ -318,6 +255,7 @@ class GTK_Main(object):
             # Assign the viewport
             imagesink = message.src
             imagesink.set_property("force-aspect-ratio", True)
+            #print "ignoring window.xid %d" % self.movie_window.window.xid
             imagesink.set_xwindow_id(self.movie_window.window.xid)
 
 if __name__ == '__main__':

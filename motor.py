@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-debug = True
+debug = False
 
 if debug:
     print "DEBUG " * 10
@@ -9,6 +9,16 @@ import time
 
 import gobject
 from gobject import timeout_add
+
+from fake_trigger import FakeTrigger
+
+import atexit
+
+def turn_off_motors(*args):
+    disable()
+    print "disabled motors"
+
+atexit.register(turn_off_motors)
 
 class FakeClient(object):
     def __init__(self, host):
@@ -99,7 +109,7 @@ def reset():
 def enable():
     client.write_coil(coil_enable, 1, 0)
 
-def disable(client):
+def disable():
     client.write_coil(coil_enable, 0, 0)
 
 def disabled(f):
@@ -236,7 +246,7 @@ def main():
     class state:
         x = None
         y = None
-        fire_duration = 200
+        fire_duration = 3000
 
     def on_button(signal, code, value):
         print "on_button: %d, %d" % (code, value)
@@ -275,7 +285,7 @@ def main():
             state.y = value
             pitch.set(state.y - 127)
         else:
-            fire_duration = 100 + (float(value) / 255.0) * 900
+            fire_duration = 100 + (float(value) / 255.0) * 2900
             print "joy: %d => fire dur %d" % (value, fire_duration)
             state.fire_duration = int(fire_duration)
 

@@ -2,6 +2,7 @@
 import sys
 import os
 import fcntl
+import atexit
 
 import gobject
 import serial
@@ -45,7 +46,7 @@ class Trigger(object):
             self._on_done_set_shot_length_cb()
         self.on_serial_block(data)
 
-    def fire(self, shot_length=200):
+    def fire(self, shot_length=3000):
         if shot_length != self.shot_length:
             self.set_shot_length(shot_length,
                                  lambda: self.s.write('s\n'))
