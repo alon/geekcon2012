@@ -45,7 +45,10 @@ class AxisData(object):
             discrete_enabled,
             input_status,
             discrete_done,
-            coil_home):
+            coil_home,
+            coil_jog_positive,
+            coil_jog_negative,
+            speed_target):
         """
         Target is relative
         Status is absolute
@@ -58,6 +61,9 @@ class AxisData(object):
         self.input_status = input_status
         self.discrete_done = discrete_done
         self.coil_home = coil_home
+        self.coil_jog_positive = coil_jog_positive
+        self.coil_jog_negative = coil_jog_negative
+        self.speed_target = speed_target
 
 theta_data = AxisData(
             coil_execute=1,
@@ -66,6 +72,9 @@ theta_data = AxisData(
             input_status=0,
             discrete_done=2,
             coil_home=4,
+            coil_jog_positive=6,
+            coil_jog_negative=7,
+            speed_target=2,
         )
 
 pitch_data = AxisData(
@@ -75,6 +84,9 @@ pitch_data = AxisData(
             input_status=1,
             discrete_done=3,
             coil_home=5,
+            coil_jog_positive=8,
+            coil_jog_negative=9,
+            speed_target=3,
         )
 
 def reset():
@@ -87,37 +99,88 @@ def enable():
 def disable(client):
     client.write_coil(coil_enable, 0, 0)
 
+def disabled(f):
+    def wrapper(self, *args, **kw):
+        if self._disabled:
+            return
+        return f(self, *args, **kw)
+    wrapper.__doc__ = f.__doc__
+    wrapper.__name__ = f.__name__
+    return wrapper
+
 class Axis(object):
     data = None
 
-    def __init__(self):
+    def __init__(self, name):
         self.during = False
+        self._execute = False
+        self.name = name
+        self._disabled = False
+        print "speed mode: enable execute"
 
-    def set(self, val):
+    def disable(self):
+        self._disabled = True
+
+    def prnt(self, fmt, *args):
+        print("%s: %s" % (self.name, fmt % args))
+
+    @disabled
+    def set_position(self, val):
         """
         This implements a set that ignores done.
          set execute
          clear execute
         """
         if self.during:
-            print "ignoring execute, during previous one"
+            self.prnt( "ignoring execute, during previous one")
             return
         if val < 0:
             val = 65536 + val
-        print "writing %d -> %d" % (self.data.register_target, val)
+        self.prnt( "writing %d -> %d" % (self.data.register_target, val))
         client.write_register(self.data.register_target, val, 0)
         self.during = True
         timeout_add(10, self.set_execute_set)
 
+    def _set_execute(self, val):
+        needed = not self.dead(val)
+        if needed == self._execute:
+            return
+        self.prnt( "setting execute to %d" % int(needed))
+        client.write_coil(self.data.coil_execute, 1, int(needed))
+        self._execute = needed
+        if not needed:
+            client.write_coil(self.data.coil_jog_positive, 0)
+            client.write_coil(self.data.coil_jog_negative, 0)
+
+    def dead(self, val):
+        return abs(val) < 5
+
+    @disabled
+    def set(self, val):
+        """ set speed"""
+        self._set_execute(val)
+        if self.dead(val):
+            return
+        self.prnt( "setting jog+ %d jog- %d speed %d (%d,%d,%d)" % (int(val > 0),
+                int(val < 0), abs(val),
+                self.data.coil_jog_positive,
+                self.data.coil_jog_negative,
+                self.data.speed_target))
+        client.write_coil(self.data.coil_jog_positive, int(val > 0))
+        client.write_coil(self.data.coil_jog_negative, int(val < 0))
+        client.write_register(self.data.speed_target, abs(val), 0)
+
+    ######## Position logic Start
     def set_execute_set(self, *args):
-        print "setting coil %d" % self.data.coil_execute
+        self.prnt( "setting coil %d" % self.data.coil_execute)
         client.write_coil(self.data.coil_execute, 1, 0)
         timeout_add(200, self.set_execute_clear)
 
     def set_execute_clear(self, *args):
-        print "clearing coil %d" % self.data.coil_execute
+        self.prnt( "clearing coil %d" % self.data.coil_execute)
         client.write_coil(self.data.coil_execute, 0, 0)
         self.during = False
+    ######## Position logic End
 
     def home(self):
         client.write_coil(self.data.coil_home, 1, 0)
@@ -150,8 +213,9 @@ def connect():
     enable()
 
 client = ModbusClient(PLS_HOST)
-theta = Theta()
-pitch = Pitch()
+theta = Theta('theta')
+pitch = Pitch('pitch')
+#theta.disable()
 
 def main():
     connect()
@@ -189,7 +253,7 @@ def main():
             state.y = value
             pitch.set(state.y - 127)
     j.connect('axis', on_axis)
-    j.connect('button', on_button)
+    #j.connect('button', on_button)
     ml = gobject.MainLoop()
     ml.run()
 
