@@ -189,7 +189,7 @@ if __name__ == '__main__':
     cv2.createTrackbar('visual', 'motempl', 0, len(visuals)-1, nothing)
     cv2.createTrackbar('threshold', 'motempl', DEFAULT_THRESHOLD, 255, nothing)
 
-	if CAPTURE_TO_AVI:
+    if CAPTURE_TO_AVI:
         # uncompressed YUV 4:2:0 chroma subsampled
         fourcc = cv.CV_FOURCC('I','4','2','0')
         fps=24
