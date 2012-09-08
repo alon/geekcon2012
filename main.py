@@ -15,12 +15,16 @@ import numpy
 import cv
 
 import sys, os
-import pygtk, gtk, gobject
+import gobject
+
+gobject.threads_init()
+
+import pygtk, gtk
 import pygst
 pygst.require("0.10")
 
 # Do it early to avoid xcb assertions
-gtk.gdk.threads_init()
+#gtk.gdk.threads_init()
 
 # don't let gst handle the --help for us
 import sys
@@ -140,7 +144,9 @@ class Controller(object):
         ret = inp = numpy.fromstring(b.data, dtype=numpy.uint8).reshape(720,480,3)
         if self.video_tracker is not None:
             ret = self.video_tracker.on_frame(inp)
-        self.video_tracker = VideoTracker(initial_frame=inp, on_cx_cy=self.on_cx_cy)
+            print "got back: %s" % str(ret.shape)
+        else:
+            self.video_tracker = VideoTracker(initial_frame=inp, on_cx_cy=self.on_cx_cy)
         return gst.Buffer(ret)
 
     def on_cx_cy(self, cx, cy):
