@@ -76,22 +76,13 @@ class Tracker(object):
 
 def center_after_median_threshold(frame, rect):
     x, y, w, h = rect
-    sub_rgb = frame[x:x+w, y:y+h, :]
+    sub_rgb = frame[y:y+h, x:x+w, :]
     sub = np.sum(sub_rgb,axis=2)
     threshold = average(sub)
-    for c in xrange(10):
-        im_thresh = sub < (threshold * (c + 1) / 10)
-        #print np.sum(im_thresh)
-        if np.sum(im_thresh) > 20:
-            break
-    #print im_thresh.size, c, im_thresh
+    im_thresh = sub < threshold
     yy, xx = np.indices(im_thresh.shape)
-    #print im_thresh
-    #print xx[im_thresh]
-    #print yy[im_thresh]
     cx = average(xx[im_thresh])
     cy = average(yy[im_thresh])
-    #print "mid", cx, cy
     return x + int(cx), y + int(cy)
 
 def draw_motion_comp(vis, (x, y, w, h), angle, color):
@@ -161,6 +152,9 @@ class VideoTracker(object):
             first_tracker = trackers[0]
             x, y, rw, rh = first_tracker.rect
             cx, cy = center_after_median_threshold(frame, first_tracker.rect)
+            cv2.circle(vis, (x,y), 5, (255, 255, 255), 3)
+            cv2.circle(vis, (x+rw,y+rh), 5, (255, 255, 255), 3)
+            #cv2.circle(vis, (cx, cy), CAPTURE_RADIUS_PX, (255, 0, 0), 1)
             color = (0,255,0) if len(first_tracker.hits)>=RELEVANT_NUMOF_HITS else (255,0,0)
             cv2.circle(vis, (cx, cy), 20, (0, 255, 0), 3)
             cv2.circle(vis, (cx, cy), CAPTURE_RADIUS_PX, (255, 0, 0), 1)
@@ -181,7 +175,7 @@ if __name__ == '__main__':
 
     cv2.namedWindow('motempl')
     visuals = ['input', 'frame_diff', 'motion_hist', 'grad_orient']
-    cv2.createTrackbar('visual', 'motempl', 2, len(visuals)-1, nothing)
+    cv2.createTrackbar('visual', 'motempl', 0, len(visuals)-1, nothing)
     cv2.createTrackbar('threshold', 'motempl', DEFAULT_THRESHOLD, 255, nothing)
 
     #cam = video.create_capture(video_src, fallback='synth:class=chess:bg=../cpp/lena.jpg:noise=0.01')
