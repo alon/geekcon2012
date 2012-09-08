@@ -1,0 +1,7 @@
+probe
+//      kernel.function("evdev_read")
+        kernel.function("input_event_to_user")
+{
+    printf("[%d] input_event_to_user: type=%d, code=%d, value=%d\n", pid(),
+           $event->type, $event->code, $event->value);
+}
