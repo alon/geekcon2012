@@ -116,6 +116,15 @@ class VideoTracker(object):
         self.tracker_group = TrackerGroup()
         self._on_cx_cy = on_cx_cy
         self._use_cv_gui = use_cv_gui
+        self._threshold = DEFAULT_THRESHOLD
+        print "threshold = %s" % self._threshold
+        if use_cv_gui:
+            self._init_cv_gui()
+
+    def _init_cv_gui(self):
+        cv2.namedWindow('motempl')
+        cv2.createTrackbar('visual', 'motempl', 0, len(visuals) - 1, nothing)
+        cv2.createTrackbar('threshold', 'motempl', self._threshold, 255, nothing)
 
     def on_frame_cv_gui(self, frame, draws, (cx, cy)):
         visual_name = visuals[cv2.getTrackbarPos('visual', 'motempl')]
@@ -150,12 +159,11 @@ class VideoTracker(object):
         cv2.imshow('motempl', vis)
 
     def on_frame(self, frame):
-        print "!"*5, "on_frame"
         h, w = frame.shape[:2]
+        #print "on_frame %d x %d" % (h, w)
         frame_diff = cv2.absdiff(frame, self.prev_frame)
         gray_diff = cv2.cvtColor(frame_diff, cv2.COLOR_BGR2GRAY)
-        thrs = cv2.getTrackbarPos('threshold', 'motempl')
-        ret, motion_mask = cv2.threshold(gray_diff, thrs, 1, cv2.THRESH_BINARY)
+        ret, motion_mask = cv2.threshold(gray_diff, self._threshold, 1, cv2.THRESH_BINARY)
         timestamp = clock()
         cv2.updateMotionHistory(motion_mask, self.motion_history, timestamp, MHI_DURATION)
         mg_mask, mg_orient = cv2.calcMotionGradient(self.motion_history, MAX_TIME_DELTA, MIN_TIME_DELTA, apertureSize=5 )
@@ -189,6 +197,7 @@ class VideoTracker(object):
         #print 'Tracker score: %s' % ','.join(['%2d'%len(tracker.hits) for tracker in trackers])
         trackers = self.tracker_group.trackers
         cx, cy = None, None
+        #print "#trackers = %d" % len(trackers)
         if len(trackers):
             first_tracker = trackers[0]
             cx, cy = center_after_median_threshold(frame, first_tracker.rect)
@@ -199,8 +208,8 @@ class VideoTracker(object):
 
         #time.sleep(0.5)
         self.prev_frame = frame.copy()
-        return vis
-
+        # TODO - print visualization onto image
+        return frame
 
 if __name__ == '__main__':
     import sys
@@ -209,14 +218,10 @@ if __name__ == '__main__':
     except:
         video_src = 0
 
-    cv2.namedWindow('motempl')
-    cv2.createTrackbar('visual', 'motempl', 0, len(visuals)-1, nothing)
-    cv2.createTrackbar('threshold', 'motempl', DEFAULT_THRESHOLD, 255, nothing)
-
     if CAPTURE_TO_AVI:
         # uncompressed YUV 4:2:0 chroma subsampled
         fourcc = cv.CV_FOURCC('I','4','2','0')
-        fps=24
+        fps = 24
         width = 720
         height = 480
         writer = cv.CreateVideoWriter('out.avi', fourcc, fps, (width, height), 1)

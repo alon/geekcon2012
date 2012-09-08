@@ -7,6 +7,7 @@ on the device files.
 
 from __future__ import with_statement
 
+import time
 import datetime
 
 import ctypes
@@ -141,11 +142,11 @@ class Controller(object):
         self.video_tracker = None
 
     def on_frame(self, b):
-        ret = inp = numpy.fromstring(b.data, dtype=numpy.uint8).reshape(720,480,3)
+        ret = inp = numpy.fromstring(b.data, dtype=numpy.uint8).reshape(480,720,3)
         if self.video_tracker is not None:
             ret = self.video_tracker.on_frame(inp)
-            print "got back: %s" % str(ret.shape)
         else:
+            print "initializing video tracker"
             self.video_tracker = VideoTracker(initial_frame=inp, on_cx_cy=self.on_cx_cy)
         return gst.Buffer(ret)
 
@@ -221,6 +222,29 @@ class GTK_Main(object):
             imagesink.set_xwindow_id(self.movie_window.window.xid)
 
 if __name__ == '__main__':
+    """
+    Tried adding sleep, not really helping, to avoid these:
+
+initializing video tracker
+
+(main.py:2569): Gdk-ERROR **: The program 'main.py' received an X Window System error.
+This probably reflects a bug in the program.
+The error was 'BadIDChoice (invalid resource ID chosen for this connection)'.
+  (Details: serial 282 error_code 14 request_code 1 minor_code 0)
+  (Note to programmers: normally, X errors are reported asynchronously;
+   that is, you will receive the error a while after causing it.
+   To debug your program, run it with the --sync command line
+   option to change this behavior. You can then get a meaningful
+   backtrace from your debugger if you break on the gdk_x_error() function.)
+Trace/breakpoint trap (core dumped)
+
+initializing video tracker
+[xcb] Unknown sequence number while processing queue
+[xcb] Most likely this is a multi-threaded client and XInitThreads has not been called
+[xcb] Aborting, sorry about that.
+python: xcb_io.c:273: poll_for_event: Assertion `!xcb_xlib_threads_sequence_lost' failed.
+
+    """
     options = get_options()
     controller = Controller()
     GTK_Main(controller)
